@@ -1,0 +1,111 @@
+[project]
+name = "py-adsb-historical-data-client"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Alexis Placet", email = "placet.alexis+pypi@protonmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "geopy>=2.4.1",
+    "pyreadsb>=1.3.0",
+    "requests>=2.32.4",
+    "types-requests>=2.32.4.20250611",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.4.0",
+    "pytest-cov>=4.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-cov>=6.1.1",
+    "ruff>=0.12.0",
+    "mypy>=1.15.0",
+]
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+line-length = 120
+indent-width = 4
+
+# Assume Python 3.12+.
+target-version = "py312"
+
+[tool.ruff.lint]
+# Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "T20"]
+ignore = [
+    "S101",  # Use of assert detected - allow in tests
+    "T201",  # Print found - allow in scripts
+    "S603",  # subprocess call - allow in scripts
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+packages = ["py_adsb_historical_data_client"]
+mypy_path = "src"
+
+# Per-module options
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
