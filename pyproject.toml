@@ -1,6 +1,6 @@
 [project]
 name = "py-adsb-historical-data-client"
-version = "0.2.0"
+version = "0.3.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -62,7 +62,7 @@ line-length = 120
 indent-width = 4
 
 # Assume Python 3.12+.
-target-version = "0.2.0"
+target-version = "0.3.0"
 
 [tool.ruff.lint]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
@@ -87,7 +87,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "0.2.0"
+python_version = "0.3.0"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
