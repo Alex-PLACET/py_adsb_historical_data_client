@@ -1,12 +1,29 @@
+from pyreadsb.heatmap_decoder import HeatmapDecoder
+from pyreadsb.traces_decoder import TraceEntry
+
+from .historical import (
+    FullHeatmapEntry,
+    download_heatmap,
+    download_traces,
+    get_heatmap,
+    get_traces,
+    get_zoned_heatmap,
+    is_valid_location,
+)
 from .logger_config import get_logger, setup_logger
 
 logger = get_logger(__name__)
 
-
-def hello() -> str:
-    message = "Hello from py-adsb-historical-data-client!"
-    logger.info(message)
-    return message
-
-
-__all__ = ["hello", "setup_logger", "get_logger"]
+__all__ = [
+    "setup_logger",
+    "get_logger",
+    "download_heatmap",
+    "get_heatmap",
+    "is_valid_location",
+    "FullHeatmapEntry",
+    "get_zoned_heatmap",
+    "download_traces",
+    "get_traces",
+    "TraceEntry",
+    "HeatmapDecoder",
+]
