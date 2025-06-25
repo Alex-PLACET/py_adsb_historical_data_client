@@ -84,7 +84,7 @@ jobs:
       run: |
         $newVersion = "${{ steps.new_version.outputs.version }}"
         $content = Get-Content pyproject.toml -Raw
-        $updated = $content -replace 'version = "[^"]*"', "version = `"$newVersion`""
+        $updated = $content -replace '(?m)^(version = "[^"]*")', "version = `"$newVersion`""
         Set-Content pyproject.toml -Value $updated -NoNewline
         echo "Updated version to $newVersion"
       shell: pwsh
@@ -120,11 +120,6 @@ jobs:
       with:
         title: Release v${{ steps.new_version.outputs.version }}
         tag: v${{ steps.new_version.outputs.version }}
-        body: |
-          Release version ${{ steps.new_version.outputs.version }}
-          
-          Changes in this release:
-          - Automated release created from commit ${{ github.sha }}
     
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
