@@ -1,6 +1,6 @@
 # import pyreadsb
 from collections.abc import Generator
-from datetime import datetime, timedelta
+from datetime import datetime
 from logging import Logger
 from typing import Final
 
