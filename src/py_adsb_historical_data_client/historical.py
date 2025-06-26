@@ -118,7 +118,7 @@ def get_zoned_heatmap(
         if isinstance(entry, HeatmapDecoder.CallsignEntry):
             icao_callsigns_map[entry.hex_id] = entry.callsign
         elif isinstance(entry, HeatmapDecoder.TimestampSeparator):
-            current_timestamp = current_timestamp + timedelta(seconds=entry.timestamp)
+            current_timestamp = datetime.fromtimestamp(entry.timestamp)
         elif isinstance(entry, HeatmapDecoder.HeatEntry):
             if is_valid_location((latitude, longitude), radius, (entry.lat, entry.lon)):
                 yield FullHeatmapEntry(
