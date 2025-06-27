@@ -4,6 +4,7 @@ from datetime import datetime
 from logging import Logger
 from typing import Final
 
+import numpy as np
 import requests
 from pyreadsb.heatmap_decoder import HeatmapDecoder
 from pyreadsb.traces_decoder import TraceEntry, process_traces_from_json_bytes
@@ -59,6 +60,32 @@ def get_heatmap(
     return heatmap_decoder.decode_from_bytes(data)
 
 
+def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
+    """
+    Calculate the Haversine distance between two geographical coordinates.
+    :param coord1: A tuple containing the latitude and longitude of the first point.
+    :param coord2: A tuple containing the latitude and longitude of the second point.
+    :return: The Haversine distance in meters.
+    """
+    lat1, lon1 = coord1
+    lat2, lon2 = coord2
+
+    # Convert to numpy arrays and radians
+    lat1_rad = np.radians(lat1)
+    lat2_rad = np.radians(lat2)
+    delta_lat = np.radians(lat2 - lat1)
+    delta_lon = np.radians(lon2 - lon1)
+
+    # Vectorized Haversine formula
+    a = np.sin(delta_lat / 2) ** 2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(delta_lon / 2) ** 2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+    # Earth radius in meters
+    distance = 6371000.0 * c
+
+    return float(distance)
+
+
 def is_valid_location(valid_location: tuple[float, float], radius: float, location: tuple[float, float]) -> bool:
     """
     Check if a given location is within a valid radius of a valid location.
@@ -67,9 +94,7 @@ def is_valid_location(valid_location: tuple[float, float], radius: float, locati
     :param location: A tuple containing the latitude and longitude to check.
     :return: True if the location is within the valid radius, False otherwise.
     """
-    from geopy.distance import geodesic
-
-    return bool(geodesic(valid_location, location).meters <= radius)
+    return haversine_distance(valid_location, location) <= radius
 
 
 class FullHeatmapEntry(HeatmapDecoder.HeatEntry):
