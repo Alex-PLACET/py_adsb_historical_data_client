@@ -123,16 +123,11 @@ class FullHeatmapEntry(HeatmapDecoder.HeatEntry):
         return f"FullHeatmapEntry(timestamp={self.timestamp}, callsign={self.callsign}, lat={self.lat}, lon={self.lon})"
 
 
-def get_zoned_heatmap(
-    timestamp: datetime, latitude: float, longitude: float, radius: float
-) -> Generator[FullHeatmapEntry]:
+def get_heatmap_entries(timestamp: datetime) -> Generator[FullHeatmapEntry]:
     """
-    Get a zoned heatmap for a given timestamp, latitude, longitude, and radius.
-    :param timestamp: The timestamp to get the heatmap for.
-    :param latitude: The latitude of the center of the zone.
-    :param longitude: The longitude of the center of the zone.
-    :param radius: The radius of the zone in meters.
-    :return: A zoned heatmap object.
+    Get zoned heatmap entries for a given timestamp.
+    :param timestamp: The timestamp to get the heatmap entries for.
+    :return: A generator of zoned heatmap entries.
     """
     heatmap_entries = get_heatmap(timestamp)
     icao_callsigns_map: dict[str, str | None] = {}
@@ -145,16 +140,32 @@ def get_zoned_heatmap(
         elif isinstance(entry, HeatmapDecoder.TimestampSeparator):
             current_timestamp = datetime.fromtimestamp(entry.timestamp)
         elif isinstance(entry, HeatmapDecoder.HeatEntry):
-            if is_valid_location((latitude, longitude), radius, (entry.lat, entry.lon)):
-                yield FullHeatmapEntry(
-                    timestamp=current_timestamp,
-                    callsign=icao_callsigns_map.get(entry.hex_id),
-                    hex_id=entry.hex_id,
-                    lat=entry.lat,
-                    lon=entry.lon,
-                    alt=entry.alt,
-                    ground_speed=entry.ground_speed,
-                )
+            yield FullHeatmapEntry(
+                timestamp=current_timestamp,
+                callsign=icao_callsigns_map.get(entry.hex_id),
+                hex_id=entry.hex_id,
+                lat=entry.lat,
+                lon=entry.lon,
+                alt=entry.alt,
+                ground_speed=entry.ground_speed,
+            )
+
+
+def get_zoned_heatmap_entries(
+    timestamp: datetime, latitude: float, longitude: float, radius: float
+) -> Generator[FullHeatmapEntry]:
+    """
+    Get a zoned heatmap for a given timestamp, latitude, longitude, and radius.
+    :param timestamp: The timestamp to get the heatmap for.
+    :param latitude: The latitude of the center of the zone.
+    :param longitude: The longitude of the center of the zone.
+    :param radius: The radius of the zone in meters.
+    :return: A zoned heatmap object.
+    """
+    heatmap_entries = get_heatmap_entries(timestamp)
+    for entry in heatmap_entries:
+        if is_valid_location((latitude, longitude), radius, (entry.lat, entry.lon)):
+            yield entry
 
 
 def download_traces(icao: str, timestamp: datetime) -> bytes:
@@ -164,7 +175,6 @@ def download_traces(icao: str, timestamp: datetime) -> bytes:
     :param timestamp: The timestamp to download the trace for.
     :return: The path to the downloaded trace file.
     """
-
     date_str: Final[str] = timestamp.strftime("%Y/%m/%d")
     sub_folder: Final[str] = icao.lower()[-2:]
     filename: Final[str] = f"trace_full_{icao.lower()}.json"
