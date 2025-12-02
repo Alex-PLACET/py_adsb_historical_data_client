@@ -5,6 +5,7 @@ This module provides a file-based caching mechanism to avoid redundant downloads
 of heatmap and trace data from the ADSB Exchange historical data API.
 """
 
+import shutil
 from datetime import datetime
 from logging import Logger
 from pathlib import Path
@@ -84,10 +85,12 @@ class Cache:
         :return: The heatmap data as bytes, or None if not cached.
         """
         path = self._get_heatmap_path(timestamp)
-        if path.exists():
+        try:
+            data = path.read_bytes()
             logger.debug(f"Reading heatmap from cache: {path}")
-            return path.read_bytes()
-        return None
+            return data
+        except FileNotFoundError:
+            return None
 
     def put_heatmap(self, timestamp: datetime, data: bytes) -> None:
         """
@@ -124,10 +127,12 @@ class Cache:
         :return: The trace data as bytes, or None if not cached.
         """
         path = self._get_trace_path(icao, timestamp)
-        if path.exists():
+        try:
+            data = path.read_bytes()
             logger.debug(f"Reading trace from cache: {path}")
-            return path.read_bytes()
-        return None
+            return data
+        except FileNotFoundError:
+            return None
 
     def put_trace(self, icao: str, timestamp: datetime, data: bytes) -> None:
         """
@@ -148,8 +153,6 @@ class Cache:
 
         Warning: This will delete all files in the cache directory.
         """
-        import shutil
-
         if self._cache_path.exists():
             shutil.rmtree(self._cache_path)
             self._cache_path.mkdir(parents=True, exist_ok=True)

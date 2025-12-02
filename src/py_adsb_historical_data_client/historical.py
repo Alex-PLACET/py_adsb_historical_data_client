@@ -238,6 +238,31 @@ def get_zoned_heatmap_entries(
             yield entry
 
 
+# Module-level headers constant to avoid recreating dict on every call
+_TRACE_HEADERS: Final[dict[str, str]] = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://globe.adsbexchange.com/",
+    "Origin": "https://globe.adsbexchange.com",
+    "DNT": "1",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
+
+
 def download_traces(
     icao: str,
     timestamp: datetime,
@@ -269,34 +294,13 @@ def download_traces(
     filename: Final[str] = f"trace_full_{icao.lower()}.json"
     url: Final[str] = f"{ADSBEXCHANGE_HISTORICAL_DATA_URL}{date_str}/traces/{sub_folder}/{filename}"
 
-    # Enhanced browser-like headers to avoid 403 errors
-    headers: Final[dict[str, str]] = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # noqa: E501
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://globe.adsbexchange.com/",
-        "Origin": "https://globe.adsbexchange.com",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-    }
-
     logger.info(f"Downloading trace for ICAO {icao} from {url}")
 
     try:
         # Use a session to maintain cookies and connection state
         with requests.Session() as session:
-            # Set session headers
-            session.headers.update(headers)
+            # Set session headers (use module-level constant)
+            session.headers.update(_TRACE_HEADERS)
 
             # Make the request
             response: Final[requests.Response] = session.get(url, timeout=30)
@@ -328,31 +332,6 @@ def get_traces(icao: str, timestamp: datetime) -> Generator[TraceEntry, None, No
     logger.debug(f"Getting traces for ICAO {icao} at timestamp {timestamp}")
     data: Final[bytes] = download_traces(icao, timestamp)
     return process_traces_from_json_bytes(data)
-
-
-# Module-level headers constant to avoid recreating dict on every call
-_TRACE_HEADERS: Final[dict[str, str]] = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://globe.adsbexchange.com/",
-    "Origin": "https://globe.adsbexchange.com",
-    "DNT": "1",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-}
 
 
 class TraceSession:
