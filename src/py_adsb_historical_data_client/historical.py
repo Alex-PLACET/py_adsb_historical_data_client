@@ -1,6 +1,6 @@
 # import pyreadsb
 from collections.abc import Generator
-from datetime import datetime
+from datetime import UTC, datetime
 from logging import Logger
 from typing import Final
 
@@ -16,11 +16,33 @@ logger: Logger = get_logger(__name__)
 ADSBEXCHANGE_HISTORICAL_DATA_URL = "https://globe.adsbexchange.com/globe_history/"
 
 
-def download_heatmap(timestamp: datetime) -> bytes:
+class ADSBClientError(Exception):
+    """Base exception for ADSB client errors."""
+
+    pass
+
+
+class DownloadError(ADSBClientError):
+    """Exception raised when a download fails."""
+
+    pass
+
+
+class HTTPError(DownloadError):
+    """Exception raised when an HTTP request fails."""
+
+    def __init__(self, url: str, status_code: int, message: str | None = None) -> None:
+        self.url = url
+        self.status_code = status_code
+        super().__init__(message or f"HTTP {status_code} error for {url}")
+
+
+def download_heatmap(timestamp: datetime, timeout: float = 30.0) -> bytes:
     """
     Download the heatmap for a given timestamp.
     :param timestamp: The timestamp to download the heatmap for.
-    :return: The path to the downloaded heatmap file.
+    :param timeout: Request timeout in seconds.
+    :return: The heatmap data as bytes.
     """
     date_str: Final[str] = timestamp.strftime("%Y/%m/%d")
     filename: Final[int] = timestamp.hour * 2 + (timestamp.minute // 30)
@@ -29,23 +51,19 @@ def download_heatmap(timestamp: datetime) -> bytes:
     logger.info(f"Downloading heatmap from {url}")
 
     try:
-        response: Final[requests.Response] = requests.get(url)
+        response: Final[requests.Response] = requests.get(url, timeout=timeout)
 
         if response.status_code == 200:
             content = response.content
-            if type(content) is not bytes:
-                error_msg = f"Expected bytes, got {type(content)} from {url} for timestamp {timestamp}"
-                logger.error(error_msg)
-                raise TypeError(error_msg)
             logger.debug(f"Successfully downloaded heatmap, size: {len(content)} bytes")
             return content
         else:
             error_msg = f"Failed to download heatmap {url}: {response.status_code}"
             logger.error(error_msg)
-            raise Exception(error_msg)
+            raise HTTPError(url, response.status_code, error_msg)
     except requests.RequestException as e:
         logger.error(f"Network error downloading heatmap from {url}: {e}")
-        raise
+        raise DownloadError(f"Network error downloading heatmap from {url}: {e}") from e
 
 
 def get_heatmap(
@@ -56,7 +74,7 @@ def get_heatmap(
     None,
 ]:
     data: Final[bytes] = download_heatmap(timestamp)
-    heatmap_decoder: Final[HeatmapDecoder] = HeatmapDecoder(False)
+    heatmap_decoder: Final[HeatmapDecoder] = HeatmapDecoder()
     return heatmap_decoder.decode_from_bytes(data)
 
 
@@ -123,11 +141,11 @@ class FullHeatmapEntry(HeatmapDecoder.HeatEntry):
         return f"FullHeatmapEntry(timestamp={self.timestamp}, callsign={self.callsign}, lat={self.lat}, lon={self.lon})"
 
 
-def get_heatmap_entries(timestamp: datetime) -> Generator[FullHeatmapEntry]:
+def get_heatmap_entries(timestamp: datetime) -> Generator[FullHeatmapEntry, None, None]:
     """
-    Get zoned heatmap entries for a given timestamp.
+    Get heatmap entries for a given timestamp.
     :param timestamp: The timestamp to get the heatmap entries for.
-    :return: A generator of zoned heatmap entries.
+    :return: A generator of heatmap entries.
     """
     heatmap_entries = get_heatmap(timestamp)
     icao_callsigns_map: dict[str, str | None] = {}
@@ -138,7 +156,7 @@ def get_heatmap_entries(timestamp: datetime) -> Generator[FullHeatmapEntry]:
         if isinstance(entry, HeatmapDecoder.CallsignEntry):
             icao_callsigns_map[entry.hex_id] = entry.callsign
         elif isinstance(entry, HeatmapDecoder.TimestampSeparator):
-            current_timestamp = datetime.fromtimestamp(entry.timestamp)
+            current_timestamp = entry.timestamp.replace(tzinfo=UTC)
         elif isinstance(entry, HeatmapDecoder.HeatEntry):
             yield FullHeatmapEntry(
                 timestamp=current_timestamp,
@@ -153,7 +171,7 @@ def get_heatmap_entries(timestamp: datetime) -> Generator[FullHeatmapEntry]:
 
 def get_zoned_heatmap_entries(
     timestamp: datetime, latitude: float, longitude: float, radius: float
-) -> Generator[FullHeatmapEntry]:
+) -> Generator[FullHeatmapEntry, None, None]:
     """
     Get a zoned heatmap for a given timestamp, latitude, longitude, and radius.
     :param timestamp: The timestamp to get the heatmap for.
@@ -173,7 +191,7 @@ def download_traces(icao: str, timestamp: datetime) -> bytes:
     Download the trace for a given ICAO and timestamp.
     :param icao: The ICAO code of the aircraft.
     :param timestamp: The timestamp to download the trace for.
-    :return: The path to the downloaded trace file.
+    :return: The trace data as bytes.
     """
     date_str: Final[str] = timestamp.strftime("%Y/%m/%d")
     sub_folder: Final[str] = icao.lower()[-2:]
@@ -218,13 +236,13 @@ def download_traces(icao: str, timestamp: datetime) -> bytes:
             else:
                 error_msg = f"Failed to download trace {url}: {response.status_code}"
                 logger.error(error_msg)
-                raise Exception(error_msg)
+                raise HTTPError(url, response.status_code, error_msg)
     except requests.RequestException as e:
         logger.error(f"Network error downloading trace for {icao} from {url}: {e}")
-        raise
+        raise DownloadError(f"Network error downloading trace for {icao} from {url}: {e}") from e
 
 
-def get_traces(icao: str, timestamp: datetime) -> Generator[TraceEntry]:
+def get_traces(icao: str, timestamp: datetime) -> Generator[TraceEntry, None, None]:
     """
     Get the trace for a given ICAO and timestamp.
     :param icao: The ICAO code of the aircraft.
