@@ -1,15 +1,18 @@
 # import pyreadsb
+import math
 from collections.abc import Generator
 from datetime import UTC, datetime
 from logging import Logger
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-import numpy as np
 import requests
 from pyreadsb.heatmap_decoder import HeatmapDecoder
 from pyreadsb.traces_decoder import TraceEntry, process_traces_from_json_bytes
 
 from .logger_config import get_logger
+
+if TYPE_CHECKING:
+    from .cache import Cache
 
 logger: Logger = get_logger(__name__)
 
@@ -37,13 +40,32 @@ class HTTPError(DownloadError):
         super().__init__(message or f"HTTP {status_code} error for {url}")
 
 
-def download_heatmap(timestamp: datetime, timeout: float = 30.0) -> bytes:
+def download_heatmap(
+    timestamp: datetime,
+    timeout: float = 30.0,
+    cache: "Cache | None" = None,
+) -> bytes:
     """
     Download the heatmap for a given timestamp.
+
     :param timestamp: The timestamp to download the heatmap for.
     :param timeout: Request timeout in seconds.
+    :param cache: Optional cache instance. If None, uses global cache if set.
     :return: The heatmap data as bytes.
     """
+    # Import here to avoid circular imports
+    from .cache import get_cache
+
+    # Use provided cache or fall back to global cache
+    effective_cache = cache if cache is not None else get_cache()
+
+    # Check cache first
+    if effective_cache is not None:
+        cached_data = effective_cache.get_heatmap(timestamp)
+        if cached_data is not None:
+            logger.debug(f"Using cached heatmap for {timestamp}")
+            return cached_data
+
     date_str: Final[str] = timestamp.strftime("%Y/%m/%d")
     filename: Final[int] = timestamp.hour * 2 + (timestamp.minute // 30)
     url: Final[str] = f"{ADSBEXCHANGE_HISTORICAL_DATA_URL}{date_str}/heatmap/{filename}.bin.ttf"
@@ -56,6 +78,11 @@ def download_heatmap(timestamp: datetime, timeout: float = 30.0) -> bytes:
         if response.status_code == 200:
             content = response.content
             logger.debug(f"Successfully downloaded heatmap, size: {len(content)} bytes")
+
+            # Store in cache
+            if effective_cache is not None:
+                effective_cache.put_heatmap(timestamp, content)
+
             return content
         else:
             error_msg = f"Failed to download heatmap {url}: {response.status_code}"
@@ -88,20 +115,18 @@ def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float])
     lat1, lon1 = coord1
     lat2, lon2 = coord2
 
-    # Convert to numpy arrays and radians
-    lat1_rad = np.radians(lat1)
-    lat2_rad = np.radians(lat2)
-    delta_lat = np.radians(lat2 - lat1)
-    delta_lon = np.radians(lon2 - lon1)
+    # Convert to radians using math module (faster for scalar values)
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lon = math.radians(lon2 - lon1)
 
-    # Vectorized Haversine formula
-    a = np.sin(delta_lat / 2) ** 2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(delta_lon / 2) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    # Haversine formula
+    a = math.sin(delta_lat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
     # Earth radius in meters
-    distance = 6371000.0 * c
-
-    return float(distance)
+    return 6371000.0 * c
 
 
 def is_valid_location(valid_location: tuple[float, float], radius: float, location: tuple[float, float]) -> bool:
@@ -180,19 +205,65 @@ def get_zoned_heatmap_entries(
     :param radius: The radius of the zone in meters.
     :return: A zoned heatmap object.
     """
+    # Pre-compute bounding box for fast rejection (approximate)
+    # 1 degree of latitude ≈ 111,320 meters
+    # 1 degree of longitude ≈ 111,320 * cos(latitude) meters
+    lat_delta = radius / 111320.0
+    lon_delta = radius / (111320.0 * math.cos(math.radians(latitude)))
+
+    min_lat = latitude - lat_delta
+    max_lat = latitude + lat_delta
+    min_lon = longitude - lon_delta
+    max_lon = longitude + lon_delta
+
+    # Pre-compute center point values for haversine
+    center_lat_rad = math.radians(latitude)
+    cos_center_lat = math.cos(center_lat_rad)
+
     heatmap_entries = get_heatmap_entries(timestamp)
     for entry in heatmap_entries:
-        if is_valid_location((latitude, longitude), radius, (entry.lat, entry.lon)):
+        # Fast bounding box rejection
+        if not (min_lat <= entry.lat <= max_lat and min_lon <= entry.lon <= max_lon):
+            continue
+
+        # Precise haversine check (inlined and optimized)
+        lat_rad = math.radians(entry.lat)
+        delta_lat = lat_rad - center_lat_rad
+        delta_lon = math.radians(entry.lon - longitude)
+
+        a = math.sin(delta_lat / 2) ** 2 + cos_center_lat * math.cos(lat_rad) * math.sin(delta_lon / 2) ** 2
+        distance = 6371000.0 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        if distance <= radius:
             yield entry
 
 
-def download_traces(icao: str, timestamp: datetime) -> bytes:
+def download_traces(
+    icao: str,
+    timestamp: datetime,
+    cache: "Cache | None" = None,
+) -> bytes:
     """
     Download the trace for a given ICAO and timestamp.
+
     :param icao: The ICAO code of the aircraft.
     :param timestamp: The timestamp to download the trace for.
+    :param cache: Optional cache instance. If None, uses global cache if set.
     :return: The trace data as bytes.
     """
+    # Import here to avoid circular imports
+    from .cache import get_cache
+
+    # Use provided cache or fall back to global cache
+    effective_cache = cache if cache is not None else get_cache()
+
+    # Check cache first
+    if effective_cache is not None:
+        cached_data = effective_cache.get_trace(icao, timestamp)
+        if cached_data is not None:
+            logger.debug(f"Using cached trace for {icao} at {timestamp.date()}")
+            return cached_data
+
     date_str: Final[str] = timestamp.strftime("%Y/%m/%d")
     sub_folder: Final[str] = icao.lower()[-2:]
     filename: Final[str] = f"trace_full_{icao.lower()}.json"
@@ -232,6 +303,11 @@ def download_traces(icao: str, timestamp: datetime) -> bytes:
 
             if response.status_code == 200:
                 logger.debug(f"Successfully downloaded trace for {icao}, size: {len(response.content)} bytes")
+
+                # Store in cache
+                if effective_cache is not None:
+                    effective_cache.put_trace(icao, timestamp, response.content)
+
                 return response.content
             else:
                 error_msg = f"Failed to download trace {url}: {response.status_code}"
@@ -252,3 +328,142 @@ def get_traces(icao: str, timestamp: datetime) -> Generator[TraceEntry, None, No
     logger.debug(f"Getting traces for ICAO {icao} at timestamp {timestamp}")
     data: Final[bytes] = download_traces(icao, timestamp)
     return process_traces_from_json_bytes(data)
+
+
+# Module-level headers constant to avoid recreating dict on every call
+_TRACE_HEADERS: Final[dict[str, str]] = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://globe.adsbexchange.com/",
+    "Origin": "https://globe.adsbexchange.com",
+    "DNT": "1",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
+
+
+class TraceSession:
+    """
+    A session-based trace downloader for efficient bulk trace downloads.
+
+    Reuses HTTP connections across multiple requests, significantly improving
+    performance when downloading traces for multiple aircraft.
+
+    Example:
+        with TraceSession() as session:
+            for icao in icao_list:
+                traces = session.get_traces(icao, timestamp)
+                for trace in traces:
+                    process(trace)
+
+        # With caching:
+        cache = Cache("/path/to/cache")
+        with TraceSession(cache=cache) as session:
+            traces = session.get_traces(icao, timestamp)
+    """
+
+    def __init__(
+        self,
+        timeout: float = 30.0,
+        cache: "Cache | None" = None,
+    ) -> None:
+        """
+        Initialize the trace session.
+
+        :param timeout: Request timeout in seconds.
+        :param cache: Optional cache instance. If None, uses global cache if set.
+        """
+        self._session: requests.Session | None = None
+        self._timeout = timeout
+        self._cache = cache
+
+    def __enter__(self) -> "TraceSession":
+        self._session = requests.Session()
+        self._session.headers.update(_TRACE_HEADERS)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        if self._session:
+            self._session.close()
+            self._session = None
+
+    def download_traces(self, icao: str, timestamp: datetime) -> bytes:
+        """
+        Download the trace for a given ICAO and timestamp using the session.
+
+        :param icao: The ICAO code of the aircraft.
+        :param timestamp: The timestamp to download the trace for.
+        :return: The trace data as bytes.
+        """
+        if self._session is None:
+            msg = "TraceSession must be used as a context manager"
+            raise RuntimeError(msg)
+
+        # Import here to avoid circular imports
+        from .cache import get_cache
+
+        # Use provided cache or fall back to global cache
+        effective_cache = self._cache if self._cache is not None else get_cache()
+
+        # Check cache first
+        if effective_cache is not None:
+            cached_data = effective_cache.get_trace(icao, timestamp)
+            if cached_data is not None:
+                logger.debug(f"Using cached trace for {icao} at {timestamp.date()}")
+                return cached_data
+
+        date_str: Final[str] = timestamp.strftime("%Y/%m/%d")
+        sub_folder: Final[str] = icao.lower()[-2:]
+        filename: Final[str] = f"trace_full_{icao.lower()}.json"
+        url: Final[str] = f"{ADSBEXCHANGE_HISTORICAL_DATA_URL}{date_str}/traces/{sub_folder}/{filename}"
+
+        logger.info(f"Downloading trace for ICAO {icao} from {url}")
+
+        try:
+            response: Final[requests.Response] = self._session.get(url, timeout=self._timeout)
+
+            if response.status_code == 200:
+                logger.debug(f"Successfully downloaded trace for {icao}, size: {len(response.content)} bytes")
+
+                # Store in cache
+                if effective_cache is not None:
+                    effective_cache.put_trace(icao, timestamp, response.content)
+
+                return response.content
+            else:
+                error_msg = f"Failed to download trace {url}: {response.status_code}"
+                logger.error(error_msg)
+                raise HTTPError(url, response.status_code, error_msg)
+        except requests.RequestException as e:
+            logger.error(f"Network error downloading trace for {icao} from {url}: {e}")
+            raise DownloadError(f"Network error downloading trace for {icao} from {url}: {e}") from e
+
+    def get_traces(self, icao: str, timestamp: datetime) -> Generator[TraceEntry, None, None]:
+        """
+        Get the trace for a given ICAO and timestamp.
+
+        :param icao: The ICAO code of the aircraft.
+        :param timestamp: The timestamp to get the trace for.
+        :return: A generator yielding trace entries.
+        """
+        logger.debug(f"Getting traces for ICAO {icao} at timestamp {timestamp}")
+        data: Final[bytes] = self.download_traces(icao, timestamp)
+        return process_traces_from_json_bytes(data)
