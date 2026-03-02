@@ -1,5 +1,6 @@
 # import pyreadsb
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Generator
 from datetime import UTC, datetime
 from logging import Logger
@@ -266,6 +267,7 @@ _TRACE_HEADERS: Final[dict[str, str]] = {
 def download_traces(
     icao: str,
     timestamp: datetime,
+    timeout: float = 30.0,
     cache: "Cache | None" = None,
 ) -> bytes:
     """
@@ -273,6 +275,7 @@ def download_traces(
 
     :param icao: The ICAO code of the aircraft.
     :param timestamp: The timestamp to download the trace for.
+    :param timeout: Request timeout in seconds.
     :param cache: Optional cache instance. If None, uses global cache if set.
     :return: The trace data as bytes.
     """
@@ -303,7 +306,7 @@ def download_traces(
             session.headers.update(_TRACE_HEADERS)
 
             # Make the request
-            response: Final[requests.Response] = session.get(url, timeout=30)
+            response: Final[requests.Response] = session.get(url, timeout=timeout)
 
             if response.status_code == 200:
                 logger.debug(f"Successfully downloaded trace for {icao}, size: {len(response.content)} bytes")
@@ -332,6 +335,79 @@ def get_traces(icao: str, timestamp: datetime) -> Generator[TraceEntry, None, No
     logger.debug(f"Getting traces for ICAO {icao} at timestamp {timestamp}")
     data: Final[bytes] = download_traces(icao, timestamp)
     return process_traces_from_json_bytes(data)
+
+
+def download_traces_parallel(
+    icaos: list[str],
+    timestamp: datetime,
+    timeout: float = 30.0,
+    max_workers: int = 8,
+    cache: "Cache | None" = None,
+) -> dict[str, bytes]:
+    """
+    Download traces for multiple ICAO codes in parallel.
+
+    Duplicate ICAO codes are downloaded once and returned once.
+
+    :param icaos: List of ICAO codes.
+    :param timestamp: The timestamp to download traces for.
+    :param timeout: Request timeout in seconds for each download.
+    :param max_workers: Maximum number of concurrent download workers.
+    :param cache: Optional cache instance. If None, uses global cache if set.
+    :return: Mapping ICAO -> trace bytes.
+    """
+    if max_workers < 1:
+        msg = "max_workers must be >= 1"
+        raise ValueError(msg)
+
+    # Keep input order while removing duplicates
+    unique_icaos: list[str] = list(dict.fromkeys(icaos))
+    if not unique_icaos:
+        return {}
+
+    worker_count = min(max_workers, len(unique_icaos))
+    results: dict[str, bytes] = {}
+
+    logger.info(f"Downloading {len(unique_icaos)} traces in parallel with {worker_count} workers")
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_icao = {
+            executor.submit(download_traces, icao, timestamp, timeout, cache): icao for icao in unique_icaos
+        }
+
+        for future in as_completed(future_to_icao):
+            icao = future_to_icao[future]
+            results[icao] = future.result()
+
+    # Return in the same order as the de-duplicated input
+    return {icao: results[icao] for icao in unique_icaos}
+
+
+def get_traces_parallel(
+    icaos: list[str],
+    timestamp: datetime,
+    timeout: float = 30.0,
+    max_workers: int = 8,
+    cache: "Cache | None" = None,
+) -> dict[str, list[TraceEntry]]:
+    """
+    Get decoded traces for multiple ICAO codes in parallel.
+
+    :param icaos: List of ICAO codes.
+    :param timestamp: The timestamp to retrieve traces for.
+    :param timeout: Request timeout in seconds for each download.
+    :param max_workers: Maximum number of concurrent download workers.
+    :param cache: Optional cache instance. If None, uses global cache if set.
+    :return: Mapping ICAO -> list of trace entries.
+    """
+    raw_traces = download_traces_parallel(
+        icaos=icaos,
+        timestamp=timestamp,
+        timeout=timeout,
+        max_workers=max_workers,
+        cache=cache,
+    )
+    return {icao: list(process_traces_from_json_bytes(data)) for icao, data in raw_traces.items()}
 
 
 class TraceSession:

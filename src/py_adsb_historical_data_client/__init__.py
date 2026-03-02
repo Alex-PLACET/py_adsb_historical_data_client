@@ -16,9 +16,11 @@ from .historical import (
     TraceSession,
     download_heatmap,
     download_traces,
+    download_traces_parallel,
     get_heatmap,
     get_heatmap_entries,
     get_traces,
+    get_traces_parallel,
     get_zoned_heatmap_entries,
     haversine_distance,
     is_valid_location,
@@ -49,7 +51,9 @@ __all__ = [
     "FullHeatmapEntry",
     # Trace functions
     "download_traces",
+    "download_traces_parallel",
     "get_traces",
+    "get_traces_parallel",
     # Utilities
     "haversine_distance",
     "is_valid_location",

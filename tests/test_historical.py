@@ -1,4 +1,5 @@
 from datetime import datetime
+from time import perf_counter, sleep
 from unittest.mock import Mock, patch
 
 import pytest
@@ -11,8 +12,10 @@ from src.py_adsb_historical_data_client.historical import (
     HTTPError,
     download_heatmap,
     download_traces,
+    download_traces_parallel,
     get_heatmap,
     get_traces,
+    get_traces_parallel,
     haversine_distance,
     is_valid_location,
 )
@@ -188,6 +191,22 @@ class TestDownloadTrace:
             assert "traces/a/" in called_url
             assert "trace_full_a.json" in called_url
 
+    def test_trace_download_custom_timeout(self, sample_icao, sample_timestamp) -> None:
+        """Test custom timeout propagation to requests session."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = b"test_data"
+
+        mock_session = Mock()
+        mock_session.get.return_value = mock_response
+        mock_session.__enter__ = Mock(return_value=mock_session)
+        mock_session.__exit__ = Mock(return_value=None)
+
+        with patch("requests.Session", return_value=mock_session):
+            download_traces(sample_icao, sample_timestamp, timeout=12.5)
+            called_timeout = mock_session.get.call_args.kwargs["timeout"]
+            assert called_timeout == 12.5
+
     @pytest.mark.integration
     def test_trace_real_download(self) -> None:
         """Integration test with real HTTP request (requires network)."""
@@ -211,6 +230,71 @@ class TestConstants:
         """Test that the ADSBEXCHANGE_HISTORICAL_DATA_URL constant is properly defined."""
         assert ADSBEXCHANGE_HISTORICAL_DATA_URL == "https://globe.adsbexchange.com/globe_history/"
         assert ADSBEXCHANGE_HISTORICAL_DATA_URL.endswith("/")
+
+
+class TestParallelTraceDownloads:
+    """Test cases for parallel trace downloads."""
+
+    def test_download_traces_parallel_downloads_each_icao_once(self, sample_timestamp) -> None:
+        icaos = ["ABC123", "DEF456", "ABC123"]
+
+        def fake_download(icao: str, timestamp: datetime, timeout: float = 30.0, cache=None) -> bytes:
+            return f"data-{icao}-{timestamp.day}-{timeout}".encode()
+
+        with patch(
+            "src.py_adsb_historical_data_client.historical.download_traces",
+            side_effect=fake_download,
+        ) as mock_download:
+            result = download_traces_parallel(icaos, sample_timestamp, timeout=9.0, max_workers=4)
+
+        assert list(result.keys()) == ["ABC123", "DEF456"]
+        assert result["ABC123"].startswith(b"data-ABC123")
+        assert result["DEF456"].startswith(b"data-DEF456")
+        assert mock_download.call_count == 2
+
+    def test_download_traces_parallel_uses_concurrency(self, sample_timestamp) -> None:
+        icaos = ["A1", "B2", "C3", "D4"]
+
+        def slow_download(icao: str, timestamp: datetime, timeout: float = 30.0, cache=None) -> bytes:
+            sleep(0.12)
+            return icao.encode()
+
+        with patch(
+            "src.py_adsb_historical_data_client.historical.download_traces",
+            side_effect=slow_download,
+        ):
+            start = perf_counter()
+            result = download_traces_parallel(icaos, sample_timestamp, max_workers=4)
+            elapsed = perf_counter() - start
+
+        assert len(result) == 4
+        # Sequential would be around 0.48s; parallel should be notably lower.
+        assert elapsed < 0.35
+
+    def test_download_traces_parallel_invalid_workers(self, sample_timestamp) -> None:
+        with pytest.raises(ValueError, match="max_workers must be >= 1"):
+            download_traces_parallel(["ABC123"], sample_timestamp, max_workers=0)
+
+    def test_get_traces_parallel_decodes_entries(self, sample_timestamp) -> None:
+        fake_raw = {"ABC123": b"raw-1", "DEF456": b"raw-2"}
+
+        def fake_decode(data: bytes):
+            return iter([f"decoded:{data.decode()}"])
+
+        with patch(
+            "src.py_adsb_historical_data_client.historical.download_traces_parallel",
+            return_value=fake_raw,
+        ):
+            with patch(
+                "src.py_adsb_historical_data_client.historical.process_traces_from_json_bytes",
+                side_effect=fake_decode,
+            ):
+                result = get_traces_parallel(["ABC123", "DEF456"], sample_timestamp)
+
+        assert result == {
+            "ABC123": ["decoded:raw-1"],
+            "DEF456": ["decoded:raw-2"],
+        }
 
 
 # Integration-style tests (can be run with --integration flag if needed)
