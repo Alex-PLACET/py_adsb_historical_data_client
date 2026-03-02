@@ -1,14 +1,14 @@
 [project]
 name = "py-adsb-historical-data-client"
 version = "1.0.0"
-description = "Add your description here"
+description = "Python library to fetch flight data from adsb exchange."
 readme = "README.md"
 authors = [
     { name = "Alexis Placet", email = "placet.alexis+pypi@protonmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "pyreadsb>=1.4.1",
+    "pyreadsb>=2.0.0",
     "requests>=2.32.5",
     "types-requests>=2.32.4.20260107",
 ]

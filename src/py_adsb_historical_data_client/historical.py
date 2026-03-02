@@ -1,7 +1,6 @@
-# import pyreadsb
 import math
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from logging import Logger
 from typing import TYPE_CHECKING, Final
