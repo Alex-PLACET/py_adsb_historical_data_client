@@ -1,6 +1,6 @@
 [project]
 name = "py-adsb-historical-data-client"
-version = "1.0.0"
+version = "1.1.0"
 description = "Python library to fetch flight data from adsb exchange."
 readme = "README.md"
 authors = [
